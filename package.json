@@ -1,5 +1,14 @@
 {
-  "name": "duck-ai-chat",
+  "name": "duck-ai-scraper",
   "version": "1.0.0",
-  "description": "A chat interface using Duck.ai backend"
+  "dependencies": {
+    "next": "^14.0.0",
+    "node-fetch": "^3.3.2",
+    "uuid": "^9.0.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  }
 }
