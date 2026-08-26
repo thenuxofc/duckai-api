@@ -1,7 +1,7 @@
 [build]
   functions = "functions"
-  publish = ".next"
+  publish = "public"
 
-[functions]
-  node_bundler = "esbuild"
-  included_files = ["src/**"]
+[dev]
+  functions = "functions"
+  port = 8888
