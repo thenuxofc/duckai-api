@@ -1,0 +1,15 @@
+{
+  "name": "duck-ai-scraper",
+  "version": "1.0.0",
+  "description": "Serverless scraper for Duck.ai",
+  "main": "functions/scrape/index.js",
+  "scripts": {
+    "start": "netlify dev",
+    "dev": "netlify dev",
+    "build": "echo \"No build step required\""
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
+  }
+}
