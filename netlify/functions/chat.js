@@ -1,13 +1,9 @@
 // netlify/functions/chat.js
-// No need to import fetch – it's globally available in Node.js 18+
+const crypto = require('crypto');
 
-// Generate a random UUID (not strictly required but can be used)
+// Generate a UUID for journey id (crypto.randomUUID is available in Node 16+)
 function uuidv4() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
+  return crypto.randomUUID();
 }
 
 // CORS headers
@@ -17,8 +13,23 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
+// Browser-like headers to mimic a real Chrome request
+const browserHeaders = {
+  'accept': '*/*',
+  'accept-language': 'en-GB,en;q=0.9,si-LK;q=0.8,si;q=0.7,en-US;q=0.6,hi;q=0.5',
+  'cache-control': 'no-store',
+  'priority': 'u=1, i',
+  'sec-ch-ua': '"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"Windows"',
+  'sec-fetch-dest': 'empty',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'same-origin',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+  'Referer': 'https://duck.ai/',
+};
+
 exports.handler = async (event) => {
-  // Handle preflight OPTIONS request
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 204,
@@ -27,7 +38,6 @@ exports.handler = async (event) => {
     };
   }
 
-  // Only POST allowed
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
@@ -37,7 +47,6 @@ exports.handler = async (event) => {
   }
 
   try {
-    // Parse the incoming conversation
     const { messages } = JSON.parse(event.body);
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return {
@@ -47,18 +56,25 @@ exports.handler = async (event) => {
       };
     }
 
-    // 1. Get a fresh x-vqd-4 token from Duck.ai status endpoint
+    // Step 1: Get a fresh x-vqd-4 token
+    const journeyId = uuidv4();
+    console.log('Fetching status with journey id:', journeyId);
+
     const statusResponse = await fetch('https://duck.ai/duckchat/v1/status', {
       method: 'GET',
       headers: {
+        ...browserHeaders,
+        'x-ddg-journey-id': journeyId,
         'x-vqd-accept': '1',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
-        'Referer': 'https://duck.ai/',
-        'Accept': '*/*',
       },
     });
 
+    console.log('Status response status:', statusResponse.status);
+    console.log('Status response headers:', JSON.stringify([...statusResponse.headers.entries()]));
+
     if (!statusResponse.ok) {
+      const statusText = await statusResponse.text();
+      console.error('Status request failed:', statusText);
       return {
         statusCode: statusResponse.status,
         headers: corsHeaders,
@@ -68,6 +84,7 @@ exports.handler = async (event) => {
 
     const vqd4Token = statusResponse.headers.get('x-vqd-4');
     if (!vqd4Token) {
+      console.error('x-vqd-4 header missing in status response');
       return {
         statusCode: 500,
         headers: corsHeaders,
@@ -75,34 +92,33 @@ exports.handler = async (event) => {
       };
     }
 
-    // 2. Prepare the chat request payload
-    // Adjust model name if needed (inspect Duck.ai network traffic for current model)
+    console.log('Got x-vqd-4 token (first 10 chars):', vqd4Token.substring(0, 10));
+
+    // Step 2: Prepare chat payload
     const chatPayload = {
-      model: 'gpt-5.6-luna', // <-- update if Duck.ai uses a different model now
+      model: 'gpt-5.6-luna', // Update if needed
       messages: messages,
       canUseTools: false,
       reasoningEffort: 'none',
     };
 
-    // 3. Forward the chat request to Duck.ai
+    // Step 3: Forward the chat request
     const chatResponse = await fetch('https://duck.ai/duckchat/v1/chat', {
       method: 'POST',
       headers: {
+        ...browserHeaders,
         'Content-Type': 'application/json',
         'x-vqd-4': vqd4Token,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+        'x-ddg-journey-id': journeyId,
         'Accept': 'text/event-stream',
-        'Referer': 'https://duck.ai/',
-        // The following headers may be required in some cases:
-        // 'x-ddg-journey-id': uuidv4(),
-        // 'x-vqd-hash-1': '...'   // <-- PROOF OF WORK REQUIRED, see notes below
+        // Note: 'x-vqd-hash-1' proof-of-work may be required; we are not sending it yet.
       },
       body: JSON.stringify(chatPayload),
     });
 
     if (!chatResponse.ok) {
       const errorText = await chatResponse.text();
-      console.error('Duck.ai chat error:', errorText);
+      console.error('Chat request failed:', errorText);
       return {
         statusCode: chatResponse.status,
         headers: corsHeaders,
@@ -110,7 +126,7 @@ exports.handler = async (event) => {
       };
     }
 
-    // 4. Stream the response back to the client
+    // Step 4: Stream the response back
     return {
       statusCode: 200,
       headers: {
