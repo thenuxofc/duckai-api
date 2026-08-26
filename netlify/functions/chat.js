@@ -1,5 +1,5 @@
 // netlify/functions/chat.js
-const fetch = require('node-fetch');
+// No need to import fetch – it's globally available in Node.js 18+
 
 // Generate a random UUID (not strictly required but can be used)
 function uuidv4() {
@@ -10,7 +10,7 @@ function uuidv4() {
   });
 }
 
-// CORS headers (Netlify functions are same-origin with frontend, but good for local dev)
+// CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type',
@@ -76,7 +76,7 @@ exports.handler = async (event) => {
     }
 
     // 2. Prepare the chat request payload
-    //    Adjust model name if needed (inspect Duck.ai network traffic for current model)
+    // Adjust model name if needed (inspect Duck.ai network traffic for current model)
     const chatPayload = {
       model: 'gpt-5.6-luna', // <-- update if Duck.ai uses a different model now
       messages: messages,
@@ -111,7 +111,6 @@ exports.handler = async (event) => {
     }
 
     // 4. Stream the response back to the client
-    //    Node's fetch returns a web ReadableStream, which Netlify can stream directly.
     return {
       statusCode: 200,
       headers: {
