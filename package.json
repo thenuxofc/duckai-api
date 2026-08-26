@@ -1,0 +1,8 @@
+{
+  "name": "duck-ai-chat",
+  "version": "1.0.0",
+  "description": "A chat interface using Duck.ai backend",
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}
