@@ -1,7 +1,6 @@
 const https = require('https');
 const { URL } = require('url');
 
-// Helper to generate UUID v4
 const generateId = () => {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
         const r = Math.random() * 16 | 0;
@@ -10,7 +9,6 @@ const generateId = () => {
     });
 };
 
-// Helper to make https requests
 const makeRequest = (options, body = null) => {
     return new Promise((resolve, reject) => {
         const req = https.request(options, (res) => {
@@ -25,7 +23,6 @@ const makeRequest = (options, body = null) => {
 };
 
 exports.handler = async (event, context) => {
-    // Handle CORS
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': '*',
@@ -40,10 +37,11 @@ exports.handler = async (event, context) => {
     try {
         const { message, history } = JSON.parse(event.body || '{}');
         
-        // 1. Generate a new Journey ID if missing or use existing
+        // 1. Generate IDs
         const journeyId = generateId();
-        
-        // 2. Setup Base Headers (Mimicking Browser)
+        const vqdHash = Buffer.from(journeyId).toString('base64').substring(0, 30);
+
+        // 2. Base Headers
         const baseHeaders = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': '*/*',
@@ -54,20 +52,50 @@ exports.handler = async (event, context) => {
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',
             'X-Ddg-Journey-Id': journeyId,
+            'X-Vqd-Accept': '1',
+            'X-Vqd-Hash-1': vqdHash,
             'Referer': 'https://duck.ai/',
             'Origin': 'https://duck.ai'
         };
 
-        // 3. Initialize Chat (Required to get context tokens)
-        // We send a payload to establish the session
+        // 3. Fetch Capabilities to find the RIGHT model
+        const capabilitiesResponse = await makeRequest({
+            hostname: 'duck.ai',
+            path: '/duckchat/v1/capabilities',
+            method: 'GET',
+            headers: {
+                ...baseHeaders,
+                'Accept': 'application/json'
+            }
+        });
+
+        let modelId = "llama-3.1-70b"; // Fallback
+        try {
+            const capData = JSON.parse(capabilitiesResponse.data);
+            // Duck.ai structure varies, but usually has a 'models' or 'selectedModel' field
+            if (capData.models && capData.models.length > 0) {
+                // Pick the first available model, or the one marked as default
+                modelId = capData.models[0].id || capData.selectedModelId || "llama-3.1-70b";
+            } else if (capData.selectedModelId) {
+                modelId = capData.selectedModelId;
+            }
+        } catch (e) {
+            console.log("Could not parse capabilities, using fallback model.");
+        }
+
+        // 4. Prepare Payload
         const chatPayload = {
-            messages: history || [], // Send history if provided
-            model: "llama-3.1-70b", // Default model, can be dynamic
+            messages: history ? history.map(h => ({
+                role: h.role === 'user' ? 'human' : 'assistant',
+                content: h.content
+            })) : [],
             prompt: message,
-            conversation_id: null, // New chat
+            model: modelId, // <--- Use the dynamically fetched model
+            conversation_id: null,
             attachments: []
         };
 
+        // 5. Send Chat Request
         const chatResponse = await makeRequest({
             hostname: 'duck.ai',
             path: '/duckchat/v1/chat',
@@ -76,27 +104,27 @@ exports.handler = async (event, context) => {
                 ...baseHeaders,
                 'Accept': 'text/event-stream',
                 'Content-Type': 'application/json',
-                'X-Vqd-Accept': '1', // Often required
-                'X-Fe-Version': 'serp_20260825_133734_ET-ea4548e57b2e941ae25474516138826d8bb4d6ab' // Using a static version for stability
+                'Priority': 'u=1, i',
+                'X-Fe-Version': 'serp_20260826_073900_ET-static' 
             }
         }, chatPayload);
 
-        // 4. Parse the SSE (Server-Sent Events) response
-        // The response comes in chunks. We need to parse the JSON events.
+        // 6. Parse SSE Response
         const lines = chatResponse.data.split('\n');
         let fullResponse = "";
         
         for (const line of lines) {
             if (line.startsWith('data: ')) {
-                const jsonStr = line.slice(6);
+                const jsonStr = line.slice(6).trim();
+                if (!jsonStr) continue;
+                
                 try {
                     const parsed = JSON.parse(jsonStr);
                     if (parsed.type === 'message' && parsed.delta) {
                         fullResponse += parsed.delta;
                     }
-                    // Handle other types like 'search_results' if needed
                 } catch (e) {
-                    // Ignore parse errors on incomplete chunks
+                    // Ignore malformed chunks
                 }
             }
         }
@@ -107,12 +135,13 @@ exports.handler = async (event, context) => {
             body: JSON.stringify({
                 success: true,
                 response: fullResponse,
-                journeyId: journeyId
+                journeyId: journeyId,
+                model: modelId
             })
         };
 
     } catch (error) {
-        console.error(error);
+        console.error("Scrape Error:", error);
         return {
             statusCode: 500,
             headers,
