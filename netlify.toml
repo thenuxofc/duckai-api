@@ -1,7 +1,7 @@
 [build]
-  command = "npm install"
-  functions = "netlify/functions"
-  publish = "public"
+  functions = "functions"
+  publish = ".next"
 
 [functions]
   node_bundler = "esbuild"
+  included_files = ["src/**"]
